@@ -17,6 +17,7 @@ import {
 import { PrivateHubCredentialStore, type HubCredentialStore } from "./credentials.js";
 import { discoverHubBundle, type HubDeployBundle } from "./deploy-bundle.js";
 import { discoverHubTriggers, type HubDeployTrigger } from "./deploy-triggers.js";
+import { HubCommandError } from "./error.js";
 import { processHubReporter, reportHubProgress, type HubReporter } from "./reporter.js";
 import { addHubResolutionHelp } from "./help.js";
 
@@ -173,14 +174,31 @@ export async function runHubDeployTriggers(
   await Promise.all(
     triggers.map((trigger) => hub.validateTrigger(origin, credential, trigger.yaml)),
   );
-  const data = await Promise.all(
-    triggers.map(async (trigger) => ({
-      ...(await hub.installTrigger(origin, credential, trigger.yaml)),
-      origin,
-      path: trigger.path,
-    })),
-  );
+  const data: HubTriggerDeployResult[] = [];
+  for (const trigger of triggers) {
+    try {
+      data.push({
+        ...(await hub.installTrigger(origin, credential, trigger.yaml)),
+        origin,
+        path: trigger.path,
+      });
+    } catch (error) {
+      if (data.length === 0) throw error;
+      throw new HubCommandError(
+        "HUB_TRIGGER_DEPLOY_PARTIAL",
+        `Could not deploy ${trigger.path} after ${String(data.length)} trigger${data.length === 1 ? "" : "s"} had been installed.`,
+        `${errorMessage(error)}\nInstalled before the failure:\n${data.map(({ path: installedPath }) => `- ${installedPath}`).join("\n")}`,
+      );
+    }
+  }
   return { type: "list", data, schema: triggerResultSchema };
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof HubCommandError) {
+    return error.details === undefined ? error.message : `${error.message}\n${error.details}`;
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 export async function runHubDeployBundle(

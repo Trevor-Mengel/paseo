@@ -17,10 +17,7 @@ export async function discoverHubTriggers(cwd: string): Promise<HubDeployTrigger
     message: `${TRIGGER_DIRECTORY} does not exist. Run this command from the project root.`,
   });
   if (paseoDirectory.isSymbolicLink()) throw unsafeTriggerPath(TRIGGER_DIRECTORY);
-  const directoryStats = await readStats(directory, {
-    code: "HUB_TRIGGER_DIRECTORY_MISSING",
-    message: `${TRIGGER_DIRECTORY} does not exist. Run this command from the project root.`,
-  });
+  const directoryStats = await readTriggerDirectoryStats(root, directory);
   if (directoryStats.isSymbolicLink()) throw unsafeTriggerPath(TRIGGER_DIRECTORY);
   if (!directoryStats.isDirectory()) {
     throw new HubCommandError(
@@ -32,7 +29,8 @@ export async function discoverHubTriggers(cwd: string): Promise<HubDeployTrigger
   let entries;
   try {
     entries = await readdir(directory, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    if (!isExpectedReadError(error)) throw error;
     throw unreadableTriggerPath(TRIGGER_DIRECTORY);
   }
   const triggers: HubDeployTrigger[] = [];
@@ -50,7 +48,8 @@ export async function discoverHubTriggers(cwd: string): Promise<HubDeployTrigger
         path: triggerPath,
         yaml: await readFile(path.join(root, triggerPath), "utf8"),
       });
-    } catch {
+    } catch (error) {
+      if (!isExpectedReadError(error)) throw error;
       throw unreadableTriggerPath(triggerPath);
     }
   }
@@ -63,6 +62,41 @@ export async function discoverHubTriggers(cwd: string): Promise<HubDeployTrigger
   return triggers;
 }
 
+async function readTriggerDirectoryStats(
+  root: string,
+  directory: string,
+): Promise<Awaited<ReturnType<typeof lstat>>> {
+  try {
+    return await lstat(directory);
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") {
+      if (!isExpectedReadError(error)) throw error;
+      throw unreadableTriggerPath(TRIGGER_DIRECTORY);
+    }
+    if (await legacyBundleExists(root)) {
+      throw new HubCommandError(
+        "HUB_PROJECT_REQUIRED",
+        "This directory contains a legacy .paseo/hub.yml bundle. Pass --project <slug> to deploy it.",
+      );
+    }
+    throw new HubCommandError(
+      "HUB_TRIGGER_DIRECTORY_MISSING",
+      `${TRIGGER_DIRECTORY} does not exist. Run this command from the project root.`,
+    );
+  }
+}
+
+async function legacyBundleExists(root: string): Promise<boolean> {
+  try {
+    await lstat(path.join(root, ".paseo/hub.yml"));
+    return true;
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return false;
+    if (!isExpectedReadError(error)) throw error;
+    throw unreadableTriggerPath(".paseo/hub.yml");
+  }
+}
+
 async function readStats(
   target: string,
   missing: { code: string; message: string },
@@ -71,6 +105,7 @@ async function readStats(
     return await lstat(target);
   } catch (error) {
     if (errorCode(error) === "ENOENT") throw new HubCommandError(missing.code, missing.message);
+    if (!isExpectedReadError(error)) throw error;
     throw unreadableTriggerPath(TRIGGER_DIRECTORY);
   }
 }
@@ -90,4 +125,16 @@ function errorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   const code = Reflect.get(error, "code");
   return typeof code === "string" ? code : undefined;
+}
+
+function isExpectedReadError(error: unknown): boolean {
+  const code = errorCode(error);
+  return (
+    code === "EACCES" ||
+    code === "EPERM" ||
+    code === "ENOENT" ||
+    code === "ENOTDIR" ||
+    code === "ELOOP" ||
+    code === "EISDIR"
+  );
 }

@@ -11,7 +11,8 @@ import {
   text,
 } from "@clack/prompts";
 import { execFile } from "node:child_process";
-import { lstat, mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { link, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { Command } from "commander";
@@ -145,7 +146,7 @@ export async function runHubGuidedSetup(
     await environment.hub.validateTrigger(origin, credential, scaffold.trigger);
   });
   log.success("Dry run passed");
-  const triggerExists = await pathExists(path.join(cwd, scaffold.triggerPath));
+  const triggerExists = await prepareScaffoldDestination(cwd, scaffold.triggerPath);
   if (
     triggerExists &&
     !(await requiredConfirm(environment, `Replace the existing ${scaffold.triggerPath}?`, false))
@@ -593,18 +594,57 @@ async function writeScaffold(
   replaceExisting: boolean,
 ): Promise<void> {
   const destination = path.join(cwd, scaffold.triggerPath);
-  await mkdir(path.dirname(destination), { recursive: true });
-  await writeFile(destination, scaffold.trigger, replaceExisting ? undefined : { flag: "wx" });
+  const temporary = path.join(
+    path.dirname(destination),
+    `.${path.basename(destination)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  try {
+    await writeFile(temporary, scaffold.trigger, { flag: "wx" });
+    if (replaceExisting) {
+      await rename(temporary, destination);
+    } else {
+      await link(temporary, destination);
+      await rm(temporary);
+    }
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
 }
 
-async function pathExists(target: string): Promise<boolean> {
+async function prepareScaffoldDestination(cwd: string, triggerPath: string): Promise<boolean> {
+  const root = path.resolve(cwd);
+  await requireSafeScaffoldDirectory(path.join(root, ".paseo"), ".paseo");
+  await requireSafeScaffoldDirectory(path.join(root, ".paseo", "triggers"), ".paseo/triggers");
+  const destination = path.join(root, triggerPath);
   try {
-    await lstat(target);
+    const stats = await lstat(destination);
+    if (stats.isSymbolicLink()) throw unsafeScaffoldPath(triggerPath);
     return true;
   } catch (error) {
     if (errorCode(error) === "ENOENT") return false;
     throw error;
   }
+}
+
+async function requireSafeScaffoldDirectory(target: string, displayPath: string): Promise<void> {
+  try {
+    const stats = await lstat(target);
+    if (stats.isSymbolicLink()) throw unsafeScaffoldPath(displayPath);
+    if (!stats.isDirectory()) {
+      throw new HubCommandError(
+        "HUB_TRIGGER_DIRECTORY_INVALID",
+        `${displayPath} must be a directory.`,
+      );
+    }
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+    await mkdir(target);
+  }
+}
+
+function unsafeScaffoldPath(triggerPath: string): HubCommandError {
+  return new HubCommandError("HUB_TRIGGER_UNSAFE_PATH", `${triggerPath} must not use a symlink.`);
 }
 
 function errorCode(error: unknown): string | undefined {

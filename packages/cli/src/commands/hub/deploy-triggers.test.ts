@@ -43,6 +43,18 @@ describe("Hub trigger deployment discovery", () => {
 
     await expect(discoverHubTriggers(cwd)).rejects.toMatchObject({ code: "HUB_TRIGGER_MISSING" });
   });
+
+  it("directs legacy bundles to the explicit project deployment path", async () => {
+    const cwd = await temporaryDirectory();
+    await mkdir(path.join(cwd, ".paseo"));
+    await writeFile(path.join(cwd, ".paseo", "hub.yml"), "environments: {}\n");
+
+    await expect(discoverHubTriggers(cwd)).rejects.toMatchObject({
+      code: "HUB_PROJECT_REQUIRED",
+      message:
+        "This directory contains a legacy .paseo/hub.yml bundle. Pass --project <slug> to deploy it.",
+    });
+  });
 });
 
 async function temporaryDirectory(): Promise<string> {

@@ -91,6 +91,45 @@ describe("Hub deployment contract", () => {
     });
   });
 
+  it("reports triggers installed before a later deployment failure", async () => {
+    const cwd = await triggerProject();
+    const secondTrigger = trigger.replace("slack-help", "z-help");
+    await writeFile(path.join(cwd, ".paseo", "triggers", "z-help.yml"), secondTrigger);
+    const hub = await captureHubRequests(4, (url, requestNumber) => {
+      if (url === "/api/v1/triggers/validate") {
+        return { status: 200, body: { name: "valid", valid: true } };
+      }
+      if (requestNumber === 3) {
+        return {
+          status: 201,
+          body: {
+            triggerId: "a50e05af-4f20-4c8f-8dcc-58e5ea360663",
+            name: "slack-help",
+            revisionId: "2de5b143-1c88-42db-8a8d-71ca2af97830",
+            version: 1,
+            active: true,
+          },
+        };
+      }
+      return { status: 500, body: { error: "failed" } };
+    });
+
+    await expect(
+      runHubDeploy({ hub: hub.origin, apiKey: "operator-secret" }, { cwd, env: {} }),
+    ).rejects.toMatchObject({
+      code: "HUB_TRIGGER_DEPLOY_PARTIAL",
+      message: "Could not deploy .paseo/triggers/z-help.yml after 1 trigger had been installed.",
+      details:
+        "Hub trigger deployment failed with HTTP 500.\nInstalled before the failure:\n- .paseo/triggers/slack-help.yml",
+    });
+    expect((await hub.received).map(({ url }) => url)).toEqual([
+      "/api/v1/triggers/validate",
+      "/api/v1/triggers/validate",
+      "/api/v1/triggers/install",
+      "/api/v1/triggers/install",
+    ]);
+  });
+
   it("installs the exact discovered bundle with finite environment and named-agent routing", async () => {
     const cwd = await canonicalProject();
     const hub = await captureHub(201, {
@@ -283,7 +322,10 @@ async function captureHub(status: number, responseBody: unknown) {
 
 async function captureHubRequests(
   count: number,
-  responseFor: (url: string | undefined) => { status: number; body: unknown },
+  responseFor: (
+    url: string | undefined,
+    requestNumber: number,
+  ) => { status: number; body: unknown },
 ) {
   const requests: unknown[] = [];
   let resolveRequests!: (requests: unknown[]) => void;
@@ -303,7 +345,7 @@ async function captureHubRequests(
         body: JSON.parse(body),
       });
       if (requests.length === count) resolveRequests(requests);
-      const configured = responseFor(request.url);
+      const configured = responseFor(request.url, requests.length);
       response.writeHead(configured.status, { "content-type": "application/json" });
       response.end(JSON.stringify(configured.body));
     });
