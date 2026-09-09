@@ -678,6 +678,7 @@ export async function stopLocalDaemon(
   const shutdownAttempt = await requestLifecycleShutdown(
     {
       home: state.home,
+      hasLiveOwner: state.running,
       host: resolveTcpHostFromListen(state.listen),
       timeoutMs: remainingTimeoutMs(),
     },

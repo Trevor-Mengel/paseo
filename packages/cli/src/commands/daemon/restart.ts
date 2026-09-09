@@ -102,8 +102,10 @@ export async function runRestartCommand(
     // Capture the effective target before stop removes the old supervisor's PID file.
     const state = runtime.resolveState({ home: startOptions.home });
     startOptions.home = state.home;
-    if (!startOptions.listen && !startOptions.port) {
-      startOptions.listen = state.listen;
+    const previousListen = state.running ? state.pidInfo?.listen : undefined;
+    const hasListenOverride = Boolean(startOptions.listen || startOptions.port);
+    if (!hasListenOverride && previousListen) {
+      startOptions.listen = previousListen;
     }
     let stopResult: Awaited<ReturnType<typeof stopLocalDaemon>>;
     try {

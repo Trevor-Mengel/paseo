@@ -10,6 +10,7 @@ export interface LifecycleShutdownRuntime {
 
 interface ShutdownTarget {
   home: string;
+  hasLiveOwner: boolean;
   host: string | null;
   timeoutMs: number;
 }
@@ -64,6 +65,12 @@ export async function requestLifecycleShutdown(
   }
   try {
     if (client.getLastServerInfoMessage()?.serverId !== expectedServerId) {
+      if (!target.hasLiveOwner) {
+        return {
+          requested: false,
+          reason: `daemon at ${host} belongs to another home; no live owner in ${target.home}`,
+        };
+      }
       throw new DaemonIdentityMismatchError(target.home, host);
     }
     await client.shutdownServer({ timeout: Math.min(remainingTimeoutMs(), 5000) });

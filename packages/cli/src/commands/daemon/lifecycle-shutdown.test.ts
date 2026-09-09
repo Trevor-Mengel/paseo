@@ -39,7 +39,7 @@ describe("home-scoped lifecycle shutdown", () => {
     const { runtime, events } = createRuntime();
     await expect(
       requestLifecycleShutdown(
-        { home: "/test-home", host: "127.0.0.1:6767", timeoutMs: 5000 },
+        { home: "/test-home", hasLiveOwner: true, host: "127.0.0.1:6767", timeoutMs: 5000 },
         runtime,
       ),
     ).rejects.toThrow("Refusing to stop");
@@ -49,7 +49,7 @@ describe("home-scoped lifecycle shutdown", () => {
     const { runtime, events } = createRuntime("srv_test");
     expect(
       await requestLifecycleShutdown(
-        { home: "/test-home", host: "127.0.0.1:6799", timeoutMs: 5000 },
+        { home: "/test-home", hasLiveOwner: true, host: "127.0.0.1:6799", timeoutMs: 5000 },
         runtime,
       ),
     ).toEqual({ requested: true });
@@ -60,7 +60,7 @@ describe("home-scoped lifecycle shutdown", () => {
     const { runtime, events } = createRuntime(null);
     await expect(
       requestLifecycleShutdown(
-        { home: "/test-home", host: "127.0.0.1:6767", timeoutMs: 5000 },
+        { home: "/test-home", hasLiveOwner: true, host: "127.0.0.1:6767", timeoutMs: 5000 },
         runtime,
       ),
     ).rejects.toThrow("Refusing to stop");
@@ -74,7 +74,7 @@ describe("home-scoped lifecycle shutdown", () => {
     };
     expect(
       await requestLifecycleShutdown(
-        { home: "/test-home", host: "127.0.0.1:6767", timeoutMs: 5000 },
+        { home: "/test-home", hasLiveOwner: true, host: "127.0.0.1:6767", timeoutMs: 5000 },
         runtime,
       ),
     ).toEqual({
@@ -89,7 +89,7 @@ describe("home-scoped lifecycle shutdown", () => {
     runtime.readServerId = () => "  ";
     expect(
       await requestLifecycleShutdown(
-        { home: "/test-home", host: "127.0.0.1:6767", timeoutMs: 5000 },
+        { home: "/test-home", hasLiveOwner: true, host: "127.0.0.1:6767", timeoutMs: 5000 },
         runtime,
       ),
     ).toEqual({
@@ -106,7 +106,7 @@ describe("home-scoped lifecycle shutdown", () => {
     };
     await expect(
       requestLifecycleShutdown(
-        { home: "/test-home", host: "127.0.0.1:6767", timeoutMs: 5000 },
+        { home: "/test-home", hasLiveOwner: true, host: "127.0.0.1:6767", timeoutMs: 5000 },
         runtime,
       ),
     ).rejects.toThrow("denied");
@@ -118,7 +118,7 @@ describe("home-scoped lifecycle shutdown", () => {
     runtime.connect = async () => null;
     expect(
       await requestLifecycleShutdown(
-        { home: "/test-home", host: "127.0.0.1:6799", timeoutMs: 5000 },
+        { home: "/test-home", hasLiveOwner: true, host: "127.0.0.1:6799", timeoutMs: 5000 },
         runtime,
       ),
     ).toEqual({
@@ -132,11 +132,38 @@ describe("home-scoped lifecycle shutdown", () => {
   test("keeps the owner PID fallback for a non-TCP listener", async () => {
     const { runtime, events } = createRuntime();
     expect(
-      await requestLifecycleShutdown({ home: "/test-home", host: null, timeoutMs: 5000 }, runtime),
+      await requestLifecycleShutdown(
+        { home: "/test-home", hasLiveOwner: true, host: null, timeoutMs: 5000 },
+        runtime,
+      ),
     ).toEqual({
       requested: false,
       reason: "daemon listen target is not TCP, falling back to owner PID signal",
     });
     expect(events).toEqual([]);
+  });
+  test("leaves an unrelated listener alone when this home has no live owner", async () => {
+    const { runtime, events } = createRuntime();
+    expect(
+      await requestLifecycleShutdown(
+        { home: "/test-home", hasLiveOwner: false, host: "127.0.0.1:6767", timeoutMs: 5000 },
+        runtime,
+      ),
+    ).toEqual({
+      requested: false,
+      reason: "daemon at 127.0.0.1:6767 belongs to another home; no live owner in /test-home",
+    });
+    expect(events).toEqual(["connect", "close"]);
+  });
+
+  test("still stops the matching daemon when its PID file is missing", async () => {
+    const { runtime, events } = createRuntime("srv_test");
+    expect(
+      await requestLifecycleShutdown(
+        { home: "/test-home", hasLiveOwner: false, host: "127.0.0.1:6799", timeoutMs: 5000 },
+        runtime,
+      ),
+    ).toEqual({ requested: true });
+    expect(events).toEqual(["connect", "shutdown", "close"]);
   });
 });

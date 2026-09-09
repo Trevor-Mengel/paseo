@@ -45,7 +45,7 @@ function createRuntime(listen = "127.0.0.1:6799") {
       return { pid: 456, logPath: "/test-home/daemon.log" };
     },
   };
-  return { runtime, starts, events };
+  return { runtime, starts, events, state };
 }
 
 describe("daemon restart target", () => {
@@ -94,5 +94,24 @@ describe("daemon restart target", () => {
     );
     expect(events).toEqual(["resolve", "stop"]);
     expect(starts).toEqual([]);
+  });
+  test("leaves listen selection to startup when the daemon is stopped", async () => {
+    const { runtime, starts, state } = createRuntime();
+    state.running = false;
+    state.pidInfo = null;
+    await runRestartCommand({ home: "/test-home" }, new Command(), runtime);
+    expect(starts.map(({ listen, port }) => ({ listen, port }))).toEqual([
+      { listen: undefined, port: undefined },
+    ]);
+  });
+
+  test("does not retain a stale supervisor's listen override", async () => {
+    const { runtime, starts, state } = createRuntime();
+    state.running = false;
+    state.stalePidFile = true;
+    await runRestartCommand({ home: "/test-home" }, new Command(), runtime);
+    expect(starts.map(({ listen, port }) => ({ listen, port }))).toEqual([
+      { listen: undefined, port: undefined },
+    ]);
   });
 });
