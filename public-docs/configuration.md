@@ -18,7 +18,9 @@ By default, Paseo uses `~/.paseo` as its home directory. The configuration file 
 ~/.paseo/config.json
 ```
 
-You can change the home directory by setting `PASEO_HOME` or passing `--home` to `paseo daemon start`.
+You can change the home directory by setting `PASEO_HOME` or passing `--home` to `paseo daemon start`. Use the same home for `paseo daemon stop` and `paseo daemon restart`. Shutdown verifies the listening daemon against that home’s saved identity and refuses a different daemon at the same address.
+
+`paseo daemon restart` retains the previous listen address. To change it, pass `--listen <address>` or `--port <port>` on the restart command, including when adopting a new listen address from `config.json`.
 
 ## Precedence
 
