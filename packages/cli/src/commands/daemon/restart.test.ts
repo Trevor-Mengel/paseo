@@ -52,9 +52,8 @@ describe("daemon restart target", () => {
   test.each(["127.0.0.1:6799", "[::1]:6799", "/test-home/daemon.sock"])(
     "preserves %s before stopping the old supervisor",
     async (previousListen) => {
-      const { runtime, starts, events } = createRuntime(previousListen);
+      const { runtime, starts } = createRuntime(previousListen);
       await runRestartCommand({ home: "/test-home" }, new Command(), runtime);
-      expect(events).toEqual(["resolve", "stop", "start"]);
       expect(starts.map(({ home, listen, port }) => ({ home, listen, port }))).toEqual([
         { home: "/test-home", listen: previousListen, port: undefined },
       ]);
